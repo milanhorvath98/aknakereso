@@ -1,5 +1,35 @@
 import tkinter as tk
 from tkinter import messagebox # For potential future use with dialogs
+from game import MinesweeperGame # Import for _reset_game
+
+# UI Enhancement Constants
+FONT_DEFAULT = ('Arial', 10)
+FONT_STATUS = ('Arial', 10, 'bold')
+FONT_BUTTON_SYMBOLS = ('Arial', 12) # Potentially for Mine/Flag if needed, or use text
+
+COLOR_BACKGROUND = '#ECECEC' # Main window background
+COLOR_FRAME_BG = '#ECECEC'   # Frame background
+COLOR_DEFAULT_BG = '#F0F0F0' # Default button background for unrevealed
+COLOR_REVEALED_EMPTY = '#DCDCDC' # Light grey for revealed empty/number (was #E0E0E0)
+COLOR_FLAGGED_BG = '#FFFFE0'     # Light yellow (was lightblue)
+COLOR_MINE_BG = '#FFB6C1'        # Light pink/red (was red)
+COLOR_BUTTON_BORDER = '#BDBDBD'  # For flat buttons with a border
+COLOR_HIGHLIGHT = '#FFFFCC'      # Light yellow for click highlight
+
+NUMBER_COLORS = {
+    1: '#0000FF',  # Blue
+    2: '#008000',  # Green
+    3: '#FF0000',  # Red
+    4: '#00008B',  # Dark Blue
+    5: '#A52A2A',  # Brown
+    6: '#00FFFF',  # Cyan
+    7: '#000000',  # Black
+    8: '#808080'   # Grey
+}
+
+CHAR_FLAG = 'F' # Using 'F' for Flag for better font compatibility (was 🚩)
+CHAR_MINE = 'M' # Using 'M' for Mine for better font compatibility (was 💣)
+
 
 # # UI elements for Minesweeper (Text-based)
 #
@@ -51,60 +81,126 @@ from tkinter import messagebox # For potential future use with dialogs
 class MinesweeperGUI:
     def __init__(self, master, game_instance):
         self.master = master
-        self.game = game_instance # Renamed from game_instance for brevity
+        self.game = game_instance
         
         master.title("Minesweeper")
+        master.config(bg=COLOR_BACKGROUND) # Set main window background
+
+        # Store fonts and colors
+        self.default_font = FONT_DEFAULT
+        self.status_font = FONT_STATUS
+        self.number_colors = NUMBER_COLORS
 
         # Main frame for better organization
-        self.main_frame = tk.Frame(master)
-        self.main_frame.pack(padx=10, pady=10) # Add some padding around the frame
+        self.main_frame = tk.Frame(master, bg=COLOR_FRAME_BG)
+        self.main_frame.pack(padx=10, pady=10)
 
         self.width = self.game.width
         self.height = self.game.height
-        self.game_over = False # Initialize game_over state
+        self.initial_num_mines = self.game.num_mines
+        self.game_over = False
         
         self.buttons = [[None for _ in range(self.width)] for _ in range(self.height)]
 
         # Create button grid
         for r in range(self.height):
             for c in range(self.width):
-                btn = tk.Button(self.main_frame, text=' ', width=2, height=1)
-                # Bind left and right clicks
+                btn = tk.Button(
+                    self.main_frame, 
+                    text=' ', 
+                    width=2, 
+                    height=1,
+                    font=self.default_font,
+                    relief=tk.FLAT, # Modern look
+                    borderwidth=1,
+                    # highlightthickness=1, # Use if borders are too subtle or for focus
+                    # highlightbackground=COLOR_BUTTON_BORDER 
+                )
                 btn.bind('<Button-1>', lambda event, row=r, col=c: self._handle_left_click(event, row, col))
                 btn.bind('<Button-3>', lambda event, row=r, col=c: self._handle_right_click(event, row, col))
-                btn.grid(row=r, column=c)
+                btn.grid(row=r, column=c) # No extra padding here, let frame handle it
                 self.buttons[r][c] = btn
         
-        # Status bar (Label)
-        self.status_label = tk.Label(master, text=f"Mines: {self.game.num_mines}", relief=tk.SUNKEN, anchor=tk.W)
-        self.status_label.pack(side=tk.BOTTOM, fill=tk.X)
+        # Reset Button
+        self.reset_button = tk.Button(
+            master, 
+            text="Reset Game", 
+            command=self._reset_game,
+            font=self.status_font,
+            relief=tk.RAISED, # Standard look for a button
+            bg=COLOR_DEFAULT_BG, # Give it a slight background
+            padx=5, pady=2
+        )
+        self.reset_button.pack(pady=(0, 10)) # Padding top 0, bottom 10
 
-        self.sync_board_to_gui() # Initial sync
+        # Status bar (Label)
+        self.status_label = tk.Label(
+            master, 
+            text=f"Mines: {self.game.num_mines}", 
+            relief=tk.SUNKEN, 
+            anchor=tk.W,
+            font=self.status_font,
+            bg=COLOR_DEFAULT_BG, # Match reset button or a neutral status color
+            padx=5
+        )
+        self.status_label.pack(side=tk.BOTTOM, fill=tk.X, pady=(5,0)) # pady was implicitly added via pack
+
+        self.sync_board_to_gui()
+
+    def _reset_game(self):
+        """Resets the game to its initial state."""
+        self.game = MinesweeperGame(self.width, self.height, self.initial_num_mines)
+        self.game_over = False
+        # No need to manually enable all buttons here, sync_board_to_gui will handle it.
+        # It sets unrevealed, unflagged cells to NORMAL state.
+        self.sync_board_to_gui()
+        # The status label is also updated by sync_board_to_gui to show correct mine/flag counts.
 
     def _handle_left_click(self, event, row, col):
         if self.game_over or self.game.flags[row][col]:
             return
 
-        result = self.game.reveal_cell(row, col)
+        # Store original clicked coordinates, as row/col might be used elsewhere if we had complex logic
+        clicked_r, clicked_c = row, col
+        
+        result = self.game.reveal_cell(clicked_r, clicked_c)
 
+        # Subtle highlight for single, non-mine, non-flood-triggering reveals
+        if isinstance(result, int) and result > 0: # result is the number of adjacent mines
+            # This means a numbered cell was revealed, not a mine, and not an empty cell that starts flood fill
+            button = self.buttons[clicked_r][clicked_c]
+            button.config(bg=COLOR_HIGHLIGHT) # Apply highlight
+            self.master.after(150, self.sync_board_to_gui) # Schedule full sync
+        else:
+            # For mines, flood-fills ('safe'), or no change (None), sync immediately
+            self.sync_board_to_gui()
+        
+        # Game Over / Win Condition Logic (largely unchanged)
         if result == 'mine':
             self.game_over = True
-            # Ensure the clicked mine itself is marked as revealed for sync_board_to_gui
-            self.game.revealed[row][col] = True 
-            self._reveal_all_unflagged_mines()
-            self.status_label.config(text="Game Over! You hit a mine.")
-            self._disable_all_buttons() # Disable buttons before final sync
-        
-        self.sync_board_to_gui() # Sync after potential game state changes
+            # self.game.revealed[clicked_r][clicked_c] is already True from reveal_cell
+            self._reveal_all_unflagged_mines() 
+            # Status label will be updated by sync_board_to_gui based on game_over state
+            self._disable_all_buttons()
+            # If highlight was applied, it will be brief. Game over state takes precedence.
+            # A final sync might be needed if the `after` call is too slow for game over.
+            # However, sync_board_to_gui is already called or scheduled.
+            # Let's ensure one runs after game_over state is fully set.
+            if not isinstance(result, int) or result <= 0: # if sync wasn't scheduled by highlight
+                 self.sync_board_to_gui()
 
-        # Check for win condition only if not a mine and game not already over by mine
-        if result != 'mine' and not self.game_over:
+
+        if not self.game_over: # Only check for win if game is not over by a mine
             if self.game.check_win_condition():
                 self.game_over = True
-                self.status_label.config(text="Congratulations! You won!")
+                # Status label will be updated by sync_board_to_gui
                 self._disable_all_buttons()
-                self.sync_board_to_gui() # Sync again to show final win state (e.g. all disabled)
-
+                if not isinstance(result, int) or result <= 0: # if sync wasn't scheduled by highlight
+                    self.sync_board_to_gui()
+        
+        # Note: The status label update logic in sync_board_to_gui already handles
+        # "Game Over! You hit a mine." and "Congratulations! You won!" messages
+        # when self.game_over is True.
 
     def _handle_right_click(self, event, row, col):
         if self.game_over or self.game.revealed[row][col]:
@@ -128,39 +224,76 @@ class MinesweeperGUI:
 
     def sync_board_to_gui(self):
         """Updates the GUI buttons to reflect the current game state."""
-        # Define colors and characters (can be moved to class/module constants)
-        COLOR_DEFAULT_BG = 'SystemButtonFace' # Default button color
-        COLOR_REVEALED_EMPTY = '#d9d9d9' # Light grey for revealed empty/number
-        COLOR_FLAGGED_BG = 'lightblue'
-        COLOR_MINE_BG = 'red'
-        CHAR_FLAG = '🚩' # Or 'F'
-        CHAR_MINE = '💣' # Or 'M'
-
+        # Colors and characters are now defined as class/module constants
+        
         for r in range(self.height):
             for c in range(self.width):
                 button = self.buttons[r][c]
                 is_revealed = self.game.revealed[r][c]
                 is_flagged = self.game.flags[r][c]
-                cell_value = self.game.board[r][c]
+                cell_value = self.game.board[r][c] # This is int or 'M'
+
+                button_config = {
+                    'font': self.default_font,
+                    'relief': tk.FLAT, # Keep flat style consistent
+                    'borderwidth': 1
+                }
 
                 if is_flagged:
-                    button.config(text=CHAR_FLAG, state=tk.DISABLED, bg=COLOR_FLAGGED_BG)
+                    button_config.update({
+                        'text': CHAR_FLAG,
+                        'state': tk.DISABLED, # Keep flagged cells disabled for left click
+                        'bg': COLOR_FLAGGED_BG,
+                        'fg': 'black' # Ensure flag char is visible
+                    })
                 elif not is_revealed:
-                    button.config(text=' ', state=tk.NORMAL, bg=COLOR_DEFAULT_BG)
+                    button_config.update({
+                        'text': ' ',
+                        'state': tk.NORMAL,
+                        'bg': COLOR_DEFAULT_BG 
+                    })
                 else: # Revealed
-                    button.config(state=tk.DISABLED)
-                    if cell_value == 'M':
-                        button.config(text=CHAR_MINE, bg=COLOR_MINE_BG)
-                    elif cell_value == 0:
-                        button.config(text=' ', bg=COLOR_REVEALED_EMPTY)
-                    else: # Number
-                        button.config(text=str(cell_value), bg=COLOR_REVEALED_EMPTY)
-        
-        # Update status label
-        # For now, just total mines. Could be updated to remaining non-flagged mines.
-        flags_placed = sum(row.count(True) for row in self.game.flags)
-        self.status_label.config(text=f"Mines: {self.game.num_mines} | Flags: {flags_placed}")
+                    button_config['state'] = tk.DISABLED
+                    button_config['bg'] = COLOR_REVEALED_EMPTY # Default for revealed
 
+                    if cell_value == 'M':
+                        button_config.update({
+                            'text': CHAR_MINE,
+                            'bg': COLOR_MINE_BG, # Specific color for mine
+                            'fg': 'black' # Ensure mine char is visible
+                        })
+                    elif cell_value == 0:
+                        button_config['text'] = ' '
+                        # bg is already COLOR_REVEALED_EMPTY
+                    else: # Number
+                        num_val = int(cell_value) # Make sure it's int for dict key
+                        button_config.update({
+                            'text': str(num_val),
+                            'fg': self.number_colors.get(num_val, 'black') # Default to black if number not in map
+                        })
+                
+                button.config(**button_config)
+        
+        self._update_status_label()
+
+    def _update_status_label(self):
+        """Updates the status label based on the current game state."""
+        flags_placed = sum(row.count(True) for row in self.game.flags)
+        
+        if self.game_over:
+            # Check if the game_over was due to a win or loss
+            # The game.check_win_condition() is true if all non-mines are revealed.
+            # If game_over is true AND check_win_condition is true, it's a win.
+            # Otherwise, if game_over is true and check_win_condition is false, it was a loss (hit a mine).
+            if self.game.check_win_condition():
+                 status_text = "Congratulations! You won!"
+            else: 
+                 status_text = "Game Over! You hit a mine."
+        else:
+            mines_remaining_to_find = self.game.num_mines - flags_placed
+            status_text = f"Mines: {mines_remaining_to_find} | Flags: {flags_placed}"
+            
+        self.status_label.config(text=status_text)
 
     # Additional methods for updating UI, handling game events will be added later
 
